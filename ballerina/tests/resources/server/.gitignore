@@ -1,0 +1,3 @@
+# Ignore Docker volumes directory - these are created by Docker containers
+# and contain files with restricted permissions that break the build
+volumes/
