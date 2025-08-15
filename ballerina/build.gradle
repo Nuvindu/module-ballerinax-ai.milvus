@@ -99,7 +99,7 @@ task startMilvusServer() {
                 println "Starting Milvus server using docker compose."
                 def composeDir = "$project.projectDir/tests/resources/server"
 
-                // Ensure local volume directories exist and are writable to avoid Docker chown permission issues
+                // Ensure local volume directories exist and fix permissions to avoid Docker chown issues
                 def volumeDirs = [
                         new File("${composeDir}/volumes/etcd"),
                         new File("${composeDir}/volumes/minio"),
@@ -110,15 +110,47 @@ task startMilvusServer() {
                         dir.mkdirs()
                     }
                 }
-                // Relax permissions for test environment (safe in CI/local only)
+                
+                // Fix ownership and permissions for volume directories
                 try {
+                    // First, try to fix ownership using sudo if available
+                    def whoamiOut = new ByteArrayOutputStream()
                     exec {
-                        workingDir composeDir
-                        commandLine 'sh', '-c', "chmod -R 777 volumes"
+                        commandLine 'whoami'
+                        standardOutput = whoamiOut
                         ignoreExitValue = true
                     }
-                } catch (Exception ignored) {
-                    // Best-effort; continue even if chmod isn't available
+                    def currentUser = whoamiOut.toString().trim()
+                    
+                    if (currentUser) {
+                        // Try with sudo first
+                        try {
+                            exec {
+                                workingDir composeDir
+                                commandLine 'sudo', 'chown', '-R', "${currentUser}:${currentUser}", 'volumes'
+                                ignoreExitValue = true
+                            }
+                        } catch (Exception e) {
+                            // If sudo fails, try without sudo
+                            exec {
+                                workingDir composeDir
+                                commandLine 'chown', '-R', "${currentUser}:${currentUser}", 'volumes'
+                                ignoreExitValue = true
+                            }
+                        }
+                    }
+                    
+                    // Set appropriate permissions (755 for directories, readable/writable for owner)
+                    exec {
+                        workingDir composeDir
+                        commandLine 'chmod', '-R', '755', 'volumes'
+                        ignoreExitValue = true
+                    }
+                    
+                    println "Fixed permissions for volume directories"
+                } catch (Exception e) {
+                    println "Warning: Could not fix permissions (${e.message}). Continuing anyway..."
+                    // Best-effort; continue even if permission fixing fails
                 }
                 def runOut = new ByteArrayOutputStream()
                 exec {
